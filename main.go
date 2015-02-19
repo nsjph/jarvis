@@ -3,18 +3,33 @@ package main
 import (
 	"crypto/tls"
 	"github.com/BurntSushi/toml"
-	_ "github.com/davecgh/go-spew/spew"
-	irc "github.com/thoj/go-ircevent"
-	"log"
-	_ "regexp"
-	"strings"
+	"github.com/op/go-logging"
+	"github.com/sorcix/irc"
+	"net"
+	"os"
+	_ "strings"
 	"time"
 )
 
+type Connection struct {
+	Server    string
+	Port      string
+	UseTLS    bool
+	TLSConfig *tls.Config
+	Nickname  string
+	Realname  string
+	Version   string
+	Data      chan *irc.Message
+	Reader    *irc.Decoder
+	Writer    *irc.Encoder
+	Conn      *irc.Conn
+	tlsConn   *tls.Conn
+	tcpConn   *net.Conn
+}
+
 type Bot struct {
-	Connections map[string]*irc.Connection
+	Connections map[string]*Connection
 	Config      *JarvisConfig
-	//Plugins     map[string]*Plugin
 }
 
 type JarvisConfig struct {
@@ -22,16 +37,19 @@ type JarvisConfig struct {
 }
 
 type Network struct {
-	Nickname string
-	Realname string
-	Version  string
-	Altnames []string
-	Servers  []string
-	Channels []string
+	Nickname  string
+	Realname  string
+	Version   string
+	UseTLS    bool `toml:"useTLS"`
+	VerifyTLS bool `toml:"verifyTLS"`
+	Altnames  []string
+	Servers   []string
+	Channels  []string
 }
 
 var (
 	jarvis                      *Bot = nil
+	configFilename                   = "jarvis.toml"
 	tlsEnabled                       = true
 	tlsVerify                        = true
 	tlsVersion                       = tls.VersionTLS12
@@ -39,90 +57,77 @@ var (
 	tlsCipherSuites                  = []uint16{
 		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}
+	log              = logging.MustGetLogger("jarvis")
+	logBackendStderr = logging.NewLogBackend(os.Stderr, "", 0)
+	logFormat        = logging.MustStringFormatter(
+		"%{color}%{time:15:04:05.000} %{shortfunc} ▶ %{level:.4s} %{id:03x}%{color:reset} %{message}",
+	)
 )
 
-func parseConfig(f string) (*JarvisConfig, error) {
+func newTLSConfig(server string, verify bool) *tls.Config {
+	log.Debug("newTLSConfig for %s", server)
+	config := new(tls.Config)
+	config.ServerName = server
+	config.InsecureSkipVerify = verify
+	config.PreferServerCipherSuites = tlsPreferServerCipherSuites
+	//config.CipherSuites = tlsCipherSuites
+
+	return config
+}
+
+func loadConfig(filename string) (*JarvisConfig, error) {
 
 	config := new(JarvisConfig)
 
-	if _, err := toml.DecodeFile(f, config); err != nil {
+	if _, err := toml.DecodeFile(filename, config); err != nil {
 		return nil, err
 	}
 
 	return config, nil
 }
 
-func newTLSConfig(serverName string) *tls.Config {
-	log.Printf("newTLSConfig for %s", serverName)
-	config := new(tls.Config)
-	config.ServerName = serverName
-	config.InsecureSkipVerify = tlsVerify
-	//config.CipherSuites = tlsCipherSuites
-	config.PreferServerCipherSuites = tlsPreferServerCipherSuites
-
-	return config
-
-}
-
-func addCallbacks(c *irc.Connection) {
-	log.Println("addCallbacks")
-	c.AddCallback("001", logEvent)
-	c.AddCallback("PRIVMSG", logEvent)
-}
-
-func logEvent(event *irc.Event) {
-	log.Printf("[%s] (%s) %s", event.Host, event.Nick, event.Message)
-}
-
-func (n Network) init() *irc.Connection {
-	connection := irc.IRC(n.Nickname, n.Realname)
-	connection.VerboseCallbackHandler = true
-	connection.Debug = true
-	hostport := strings.Split(n.Servers[0], ":")
-	if len(hostport) != 2 {
-		log.Fatalf("Server host:port (%s) not specified correctly", n.Servers[0])
-	}
-
-	host := hostport[0]
-
-	if tlsEnabled == true {
-		connection.UseTLS = true
-		connection.TLSConfig = newTLSConfig(host)
-	}
-
-	addCallbacks(connection)
-
-	return connection
+func initLogging() {
+	logging.SetFormatter(logFormat)
+	logging.SetBackend(logBackendStderr)
+	log.Debug("Logging configured")
 }
 
 func main() {
 
-	config, err := parseConfig("jarvis.toml")
-	if err != nil {
-		log.Fatalf("Error parsing config: %v", err)
-	}
+	// Logging init
+	initLogging()
 
 	jarvis := new(Bot)
-	jarvis.Config = config
-	jarvis.Connections = make(map[string]*irc.Connection)
 
-	for k, v := range jarvis.Config.Networks {
-		connection, success := jarvis.Connections[k]
-		if success == false {
-			connection = v.init()
-		}
-		log.Printf("network [%s], servers = %v", k, v.Servers)
-		jarvis.Connections[k] = connection
+	if config, err := loadConfig(configFilename); err != nil {
+		log.Error("Error loading config file %s: %v", configFilename, err)
+		os.Exit(1)
+	} else {
+		jarvis.Config = config
 	}
+
+	log.Debug("# of networks defined in config: %d", len(jarvis.Config.Networks))
+	jarvis.initConnections()
+
+	//jarvis.Connections = make(map[string]*Connection)
+
+	// for k, v := range jarvis.Config.Networks {
+	// 	// connection, success := jarvis.Connections[k]
+	// 	// if success == false {
+	// 	// 	connection = v.init()
+	// 	// }
+	// 	// log.Printf("network [%s], servers = %v", k, v.Servers)
+	// 	// jarvis.Connections[k] = connection
+	// }
 
 	// Connect to each network
-	for k, v := range jarvis.Connections {
-		log.Printf("Connecting to %s", k)
-		network, success := jarvis.Config.Networks[k]
-		if success {
-			v.Connect(network.Servers[0])
-		}
-	}
+	// for k, v := range jarvis.Connections {
+	// 	log.Printf("Connecting to %s", k)
+	// 	network, success := jarvis.Config.Networks[k]
+	// 	if success {
+	// 		v.Connect(network.Servers[0])
+	// 	}
+	// }
 
 	// For each
 
