@@ -1,54 +1,80 @@
 package main
 
 import (
-	"crypto/tls"
-	_ "github.com/op/go-logging"
-	"github.com/sorcix/irc"
-	"net"
+	irc "github.com/nsjph/goirc/client"
 )
 
-func newConnection(n Network) (*Connection, error) {
-	var err error
-	c := new(Connection)
-	c.Server, c.Port, err = net.SplitHostPort(n.Servers[0])
-	if err != nil {
-		log.Debug("Error parsing %s: %v", n.Servers[0], err)
-		return nil, err
-	}
+// type Connection struct {
+// 	*client.Conn
+// 	network *Network
+// }
 
-	if n.UseTLS == true {
-		c.UseTLS = true
-		c.TLSConfig = newTLSConfig(c.Server, n.VerifyTLS)
-		c.tlsConn, err = tls.Dial("tcp", c.Server+":"+c.Port, c.TLSConfig)
-		if err != nil {
-			log.Fatalf("Unable to establish TLS connection to %s: %v", c.Server, err)
+type ChannelOpt struct {
+	autojoin bool
+}
+
+func (b *Bot) startConnections() error {
+	for network, conn := range b.connections {
+		log.Info("Connecting to %s (%s)", network, conn.Config().Server)
+		if err := conn.Connect(); err != nil {
+			log.Error("Connection error: ", err)
+			return err
 		} else {
-			log.Debug("Connected to %s", c.Server)
-			c.Conn = irc.NewConn(c.tlsConn)
-			c.Reader = irc.NewDecoder(c.tlsConn)
-			c.Writer = irc.NewEncoder(c.tlsConn)
+			log.Info("Connected to %s", network)
+			//conn.Join("jarvis-test")
 		}
 	}
-	return c, nil
+	return nil
+}
 
+func newConnection(n *Network) *irc.Conn {
+
+	cfg := irc.NewConfig(n.Nickname)
+	cfg.Server = n.Servers[0]
+	cfg.Version = n.Version
+	cfg.QuitMessage = "It's full of stars..."
+	//cfg.Me.Ident = "jarvis"
+	//cfg.Me.Name = n.Realname
+	cfg.UseIPv6 = n.UseIPv6
+	cfg.NewNick = func(n string) string { return n + "_" }
+
+	conn := irc.Client(cfg)
+
+	conn.HandleFunc("CONNECTED", func(conn *irc.Conn, line *irc.Line, config *Network) {
+		log.Debug("CONNECTED on network %s", n.Nickname)
+	})
+	conn.HandleFunc("connected",
+		func(conn *irc.Conn, line *irc.Line) {
+			log.Debug("connected")
+			conn.Join("#jarvis-test")
+		})
+
+	return conn
+
+	//return &Connection{conn, n}
 }
 
 func (b *Bot) initConnections() {
-	var err error
 
-	if b.Connections == nil {
-		log.Debug("Initializing new Connections struct")
-		b.Connections = make(map[string]*Connection)
+	if b.config == nil {
+		log.Warning("initConnections: No connections to initialize, config empty")
+		return
 	}
 
-	for k, v := range b.Config.Networks {
-		connection, success := b.Connections[k]
+	if b.connections == nil {
+		log.Debug("initConnections: Initializing bot.connections map")
+		b.connections = make(map[string]*irc.Conn)
+	}
+
+	for k, v := range b.config.Networks {
+		conn, success := b.connections[k]
 		if success == false {
-			connection, err = newConnection(v)
-			if err != nil {
-				log.Fatalf("Failed to create connection for network [%s]: %v", k, err)
-			}
-			b.Connections[k] = connection
+			log.Debug("initConnections: Creating connection for [%s]", k)
+			conn = newConnection(&v)
+			//conn.addDefaultHandlers()
+			b.connections[k] = conn
+		} else {
+			log.Debug("initConnections: Connection exists for [%s]", k)
 		}
 	}
 }

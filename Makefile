@@ -47,7 +47,9 @@ vendor_get: vendor_clean
 	GOPATH=${PWD}/_vendor go get -d -u -v \
 	github.com/davecgh/go-spew/spew \
 	github.com/BurntSushi/toml \
-	github.com/thoj/go-ircevent 
+	github.com/golang/glog \
+	github.com/fluffle/goirc/client \
+	github.com/codegangsta/cli
 
 vendor_update: vendor_get
 	rm -rf `find ./_vendor/src -type d -name .git` \

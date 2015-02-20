@@ -1,96 +1,24 @@
 package main
 
 import (
-	"crypto/tls"
-	"github.com/BurntSushi/toml"
 	"github.com/codegangsta/cli"
+	"github.com/davecgh/go-spew/spew"
+	// irc "github.com/fluffle/goirc/client"
 	"github.com/op/go-logging"
-	"github.com/sorcix/irc"
-	"net"
 	"os"
-	_ "strings"
 	"time"
 )
 
-type Connection struct {
-	Server    string
-	Port      string
-	UseTLS    bool
-	TLSConfig *tls.Config
-	Nickname  string
-	Realname  string
-	Version   string
-	Data      chan *irc.Message
-	Reader    *irc.Decoder
-	Writer    *irc.Encoder
-	Conn      *irc.Conn
-	tlsConn   *tls.Conn
-	tcpConn   *net.Conn
-	Channels  map[string]*ChannelOpts
-}
-
-type ChannelOpts struct {
-	autojoin bool
-}
-
-type Bot struct {
-	Connections map[string]*Connection
-	Config      *JarvisConfig
-}
-
-type JarvisConfig struct {
-	Networks map[string]Network
-}
-
-type Network struct {
-	Nickname  string
-	Realname  string
-	Version   string
-	UseTLS    bool `toml:"useTLS"`
-	VerifyTLS bool `toml:"verifyTLS"`
-	Altnames  []string
-	Servers   []string
-	Channels  []string
-}
-
 var (
-	jarvis                      *Bot = nil
-	configFilename                   = "jarvis.toml"
-	tlsEnabled                       = true
-	tlsVerify                        = true
-	tlsVersion                       = tls.VersionTLS12
-	tlsPreferServerCipherSuites      = false
-	tlsCipherSuites                  = []uint16{
-		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}
+	//jarvis                      *Bot = nil
+	//configFilename              = "jarvis.toml"
+
 	log              = logging.MustGetLogger("jarvis")
 	logBackendStderr = logging.NewLogBackend(os.Stderr, "", 0)
 	logFormat        = logging.MustStringFormatter(
 		"%{color}%{time:15:04:05.000} %{shortfunc} ▶ %{level:.4s} %{id:03x}%{color:reset} %{message}",
 	)
 )
-
-func newTLSConfig(server string, verify bool) *tls.Config {
-	log.Debug("newTLSConfig for %s", server)
-	config := new(tls.Config)
-	config.ServerName = server
-	config.InsecureSkipVerify = verify
-	config.PreferServerCipherSuites = tlsPreferServerCipherSuites
-	//config.CipherSuites = tlsCipherSuites
-
-	return config
-}
-
-func loadConfig(filename string) (*JarvisConfig, error) {
-
-	config := new(JarvisConfig)
-
-	if _, err := toml.DecodeFile(filename, config); err != nil {
-		return nil, err
-	}
-
-	return config, nil
-}
 
 func initLogging() {
 	logging.SetFormatter(logFormat)
@@ -101,17 +29,34 @@ func initLogging() {
 func start(c *cli.Context) {
 	log.Debug("Inside start")
 
-	jarvis := new(Bot)
-	jarvis.Connections = make(map[string]*Connection)
+	quit := make(chan bool)
 
-	connection := &Connection{
-		Server:   c.String("server"),
-		Port:     c.String("port"),
-		Nickname: c.String("nickname"),
-		Channels: make(map[string]*ChannelOpts),
+	var err error
+	var config *JarvisConfig = nil
+	var configFile string = c.String("config")
+
+	config, err = loadConfig(configFile)
+	if err != nil {
+		log.Warning("Unable to load config file %s: %v", configFile, err)
+	} else {
+		config.filename = configFile
+		spew.Dump(config)
 	}
 
-	connection.Channels[c.String("channel")] = &ChannelOpts{true}
+	jarvis := newBot(config)
+	jarvis.initConnections()
+	jarvis.startConnections()
+
+	<-quit
+
+	// connection := &Connection{
+	// 	Server:   c.String("server"),
+	// 	Port:     c.String("port"),
+	// 	Nickname: c.String("nickname"),
+	// 	Channels: make(map[string]*ChannelOpts),
+	// }
+
+	// connection.Channels[c.String("channel")] = &ChannelOpts{true}
 
 }
 
@@ -121,7 +66,7 @@ func main() {
 	initLogging()
 
 	app := newApp()
-	app.Run(os.Args)
+	go app.Run(os.Args)
 
 	// jarvis := new(Bot)
 
