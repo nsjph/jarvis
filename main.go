@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"github.com/BurntSushi/toml"
+	"github.com/codegangsta/cli"
 	"github.com/op/go-logging"
 	"github.com/sorcix/irc"
 	"net"
@@ -25,6 +26,11 @@ type Connection struct {
 	Conn      *irc.Conn
 	tlsConn   *tls.Conn
 	tcpConn   *net.Conn
+	Channels  map[string]*ChannelOpts
+}
+
+type ChannelOpts struct {
+	autojoin bool
 }
 
 type Bot struct {
@@ -92,22 +98,42 @@ func initLogging() {
 	log.Debug("Logging configured")
 }
 
+func start(c *cli.Context) {
+	log.Debug("Inside start")
+
+	jarvis := new(Bot)
+	jarvis.Connections = make(map[string]*Connection)
+
+	connection := &Connection{
+		Server:   c.String("server"),
+		Port:     c.String("port"),
+		Nickname: c.String("nickname"),
+		Channels: make(map[string]*ChannelOpts),
+	}
+
+	connection.Channels[c.String("channel")] = &ChannelOpts{true}
+
+}
+
 func main() {
 
 	// Logging init
 	initLogging()
 
-	jarvis := new(Bot)
+	app := newApp()
+	app.Run(os.Args)
 
-	if config, err := loadConfig(configFilename); err != nil {
-		log.Error("Error loading config file %s: %v", configFilename, err)
-		os.Exit(1)
-	} else {
-		jarvis.Config = config
-	}
+	// jarvis := new(Bot)
 
-	log.Debug("# of networks defined in config: %d", len(jarvis.Config.Networks))
-	jarvis.initConnections()
+	// if config, err := loadConfig(configFilename); err != nil {
+	// 	log.Error("Error loading config file %s: %v", configFilename, err)
+	// 	os.Exit(1)
+	// } else {
+	// 	jarvis.Config = config
+	// }
+
+	// log.Debug("# of networks defined in config: %d", len(jarvis.Config.Networks))
+	// jarvis.initConnections()
 
 	//jarvis.Connections = make(map[string]*Connection)
 
