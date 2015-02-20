@@ -1,80 +1,111 @@
 package main
 
 import (
-	irc "github.com/nsjph/goirc/client"
+	_ "github.com/davecgh/go-spew/spew"
+	"github.com/nickvanw/ircx"
+	_ "github.com/sorcix/irc"
+	"net"
 )
 
-// type Connection struct {
-// 	*client.Conn
-// 	network *Network
-// }
-
-type ChannelOpt struct {
-	autojoin bool
+type Connection struct {
+	bot    *ircx.Bot
+	config *Network
 }
 
-func (b *Bot) startConnections() error {
-	for network, conn := range b.connections {
-		log.Info("Connecting to %s (%s)", network, conn.Config().Server)
-		if err := conn.Connect(); err != nil {
-			log.Error("Connection error: ", err)
-			return err
-		} else {
-			log.Info("Connected to %s", network)
-			//conn.Join("jarvis-test")
+func (n *Network) newConnection() *Connection {
+
+	var transport string = ""
+
+	if n.UseIPv6 == true {
+		transport = "tcp6"
+	} else {
+		transport = "tcp"
+	}
+
+	host, _, err := net.SplitHostPort(n.Servers[0])
+	if err != nil {
+		log.Fatalf("Error parsing %s into host:port", n.Servers[0])
+	}
+
+	tcpaddr, err := net.ResolveTCPAddr(transport, n.Servers[0])
+	if err != nil {
+		log.Fatalf("newConnection: Failed looking up %s: %v", host, err)
+	} else {
+		log.Debug("Resolved server to %s", tcpaddr.String())
+	}
+
+	bot := ircx.Classic(tcpaddr.String(), n.Nickname)
+
+	return &Connection{
+		bot:    bot,
+		config: n,
+	}
+}
+
+func (j *Jarvis) initConnections() (err error) {
+
+	if j.connections == nil {
+		log.Warning("initConnections: initializing connections map")
+		j.connections = make(map[string]*Connection)
+	}
+
+	for k, v := range j.config.Networks {
+		_, success := j.connections[k]
+		if !success {
+			j.connections[k] = v.newConnection()
 		}
 	}
+
 	return nil
 }
 
-func newConnection(n *Network) *irc.Conn {
+func (c *Connection) startConnection() error {
+	log.Debug("starting connection to %s", c.bot.Server)
 
-	cfg := irc.NewConfig(n.Nickname)
-	cfg.Server = n.Servers[0]
-	cfg.Version = n.Version
-	cfg.QuitMessage = "It's full of stars..."
-	//cfg.Me.Ident = "jarvis"
-	//cfg.Me.Name = n.Realname
-	cfg.UseIPv6 = n.UseIPv6
-	cfg.NewNick = func(n string) string { return n + "_" }
+	err := c.bot.Connect()
+	if err != nil {
+		log.Debug("Error connecting to %s: %v", c.bot.Server, err)
+		return err
+	}
 
-	conn := irc.Client(cfg)
+	c.RegisterHandlers()
 
-	conn.HandleFunc("CONNECTED", func(conn *irc.Conn, line *irc.Line, config *Network) {
-		log.Debug("CONNECTED on network %s", n.Nickname)
-	})
-	conn.HandleFunc("connected",
-		func(conn *irc.Conn, line *irc.Line) {
-			log.Debug("connected")
-			conn.Join("#jarvis-test")
-		})
+	c.bot.CallbackLoop()
 
-	return conn
-
-	//return &Connection{conn, n}
+	return nil
 }
 
-func (b *Bot) initConnections() {
+// type Callback struct {
+// 	Handler Handler
+// 	Sender  Sender
+// }
 
-	if b.config == nil {
-		log.Warning("initConnections: No connections to initialize, config empty")
-		return
-	}
+// type Handler interface {
+// 	Handle(Sender, *irc.Message)
+// }
 
-	if b.connections == nil {
-		log.Debug("initConnections: Initializing bot.connections map")
-		b.connections = make(map[string]*irc.Conn)
-	}
+// type Sender interface {
+// 	Send(*irc.Message) error
+// }
 
-	for k, v := range b.config.Networks {
-		conn, success := b.connections[k]
-		if success == false {
-			log.Debug("initConnections: Creating connection for [%s]", k)
-			conn = newConnection(&v)
-			//conn.addDefaultHandlers()
-			b.connections[k] = conn
-		} else {
-			log.Debug("initConnections: Connection exists for [%s]", k)
-		}
-	}
-}
+// type HandlerFunc func(s Sender, m *irc.Message)
+
+// func (f HandlerFunc) Handle(s Sender, m *irc.Message) {
+// 	f(s, m)
+// }
+
+// // Implement ircx.Handler interface
+
+// func (c *Connection) Handle(s Sender, m *irc.Message) {
+// 	log.Debug("Handle")
+// 	spew.Dump(s)
+// 	spew.Dump(m)
+// }
+
+// Implement ircx.Sender interface
+
+// func (c *Connection) Send(m *irc.Message) error {
+// 	log.Debug("Send")
+// 	spew.Dump(m)
+// 	return nil
+// }

@@ -1,20 +1,32 @@
 package main
 
 import (
-//irc "github.com/nsjph/goirc/client"
+	_ "github.com/davecgh/go-spew/spew"
+	"github.com/nickvanw/ircx"
+	"github.com/sorcix/irc"
 )
 
-// func connectEvent(conn *Connection, line *irc.Line) {
-// 	for i, v := range conn.config.Channels {
-// 		log.Debug("I should connect to this channel: ", v)
-// 	}
-// }
+func (c *Connection) RegisterHandlers() {
+	c.bot.AddCallback(irc.RPL_WELCOME, ircx.Callback{Handler: ircx.HandlerFunc(c.RegisterConnect)})
+	c.bot.AddCallback(irc.PING, ircx.Callback{Handler: ircx.HandlerFunc(PingHandler)})
+}
 
-// func (c *irc.Conn) addDefaultHandlers() {
-// 	log.Debug("addDefaultHandlers")
-// 	c.HandleFunc("connected",
-// 		func(conn *irc.Conn, line *irc.Line) {
-// 			conn.Join("#jarvis-test")
-// 		})
+func (c *Connection) RegisterConnect(s ircx.Sender, m *irc.Message) {
+	log.Debug("RegisterConnect")
 
-// }
+	for _, v := range c.config.Channels {
+		log.Debug("Joining %s", v)
+		s.Send(&irc.Message{
+			Command: irc.JOIN,
+			Params:  []string{v},
+		})
+	}
+}
+
+func PingHandler(s ircx.Sender, m *irc.Message) {
+	s.Send(&irc.Message{
+		Command:  irc.PONG,
+		Params:   m.Params,
+		Trailing: m.Trailing,
+	})
+}
