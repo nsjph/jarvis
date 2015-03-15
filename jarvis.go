@@ -1,20 +1,30 @@
 package main
 
 import (
+	"github.com/boltdb/bolt"
 	"github.com/codegangsta/cli"
-	_ "github.com/davecgh/go-spew/spew"
-	_ "github.com/nickvanw/ircx"
+	//cli "github.com/jawher/mow.cli"
 )
 
 type Jarvis struct {
 	connections map[string]*Connection
 	config      *JarvisConfig
+	db          *bolt.DB
 }
 
 func start(c *cli.Context) {
-	log.Debug("Inside start")
-
 	var err error
+
+	// log.Debug("Inside start")
+	// plugins, err := pluginsAvailable(os.Getenv("HOME") + "/.jarvis/plugins/")
+	// if err != nil {
+	// 	log.Error("Failed to check for plugins: %v", err)
+	// 	return
+	// }
+	// loadGlispPlugins(plugins)
+
+	// return
+
 	var config *JarvisConfig = nil
 	var configFile string = c.String("config")
 
@@ -24,6 +34,8 @@ func start(c *cli.Context) {
 	} else {
 		config.filename = configFile
 	}
+
+	config.pluginDirectory = c.String("plugins")
 
 	jarvis := &Jarvis{
 		connections: make(map[string]*Connection),
@@ -37,4 +49,5 @@ func start(c *cli.Context) {
 			log.Error("Error connecting to %s: %v", k, err)
 		}
 	}
+
 }

@@ -7,6 +7,7 @@ jarvis.toml
 # Folders
 _obj
 _test
+plugins
 
 # Architecture specific extensions/prefixes
 *.[568vq]

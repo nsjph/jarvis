@@ -1,15 +1,17 @@
 package main
 
 import (
-	_ "github.com/davecgh/go-spew/spew"
+	"github.com/boltdb/bolt"
 	"github.com/nickvanw/ircx"
-	_ "github.com/sorcix/irc"
 	"net"
 )
 
 type Connection struct {
-	bot    *ircx.Bot
-	config *Network
+	name    string
+	bot     *ircx.Bot
+	config  *Network
+	plugins []*GlispPlugin
+	db      *bolt.DB
 }
 
 func (n *Network) newConnection() *Connection {
@@ -35,6 +37,7 @@ func (n *Network) newConnection() *Connection {
 	}
 
 	bot := ircx.Classic(tcpaddr.String(), n.Nickname)
+	//plugins, err := initPlugins()
 
 	return &Connection{
 		bot:    bot,
@@ -50,9 +53,18 @@ func (j *Jarvis) initConnections() (err error) {
 	}
 
 	for k, v := range j.config.Networks {
-		_, success := j.connections[k]
+		connection, success := j.connections[k]
 		if !success {
-			j.connections[k] = v.newConnection()
+			connection = v.newConnection()
+			connection.db = j.db
+			connection.name = k
+			// plugins, err := initPlugins(j.config.pluginDirectory)
+			// if err != nil {
+			// 	log.Error("Unable to init plugins: %v", err)
+			// } else {
+			// 	connection.plugins = plugins
+			// }
+			j.connections[k] = connection
 		}
 	}
 

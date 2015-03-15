@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/codegangsta/cli"
+	_ "github.com/davecgh/go-spew/spew"
 	"os"
+	"path"
+	_ "path/filepath"
 )
 
 var (
@@ -19,8 +22,14 @@ var (
 )
 
 type JarvisConfig struct {
-	filename string
-	Networks map[string]Network
+	filename        string
+	Networks        map[string]Network
+	pluginDirectory string
+	// Plugins  *PluginConfig //`toml:"plugins"`
+}
+
+type PluginConfig struct {
+	location string
 }
 
 type Network struct {
@@ -33,6 +42,7 @@ type Network struct {
 	Altnames  []string
 	Servers   []string
 	Channels  []string
+	Prefix    string // (single-character) prefix for commands, i.e. ! # % @ ,
 }
 
 func newApp() *cli.App {
@@ -50,6 +60,11 @@ func newApp() *cli.App {
 			Name:  "server, s",
 			Value: "irc.freenode.net",
 			Usage: "IRC server to connect to",
+		},
+		cli.StringFlag{
+			Name:  "plugins",
+			Value: path.Join(os.Getenv("HOME"), "/.jarvis/plugins"),
+			Usage: "Plugin directory location",
 		},
 		cli.StringFlag{
 			Name:  "port, p",
@@ -80,6 +95,8 @@ func loadConfig(filename string) (*JarvisConfig, error) {
 	if _, err := toml.DecodeFile(filename, config); err != nil {
 		return nil, err
 	}
+
+	//spew.Dump(config)
 
 	return config, nil
 }
